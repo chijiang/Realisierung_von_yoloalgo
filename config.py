@@ -22,3 +22,4 @@ TEST_SET_FOLDER = TEST_DIR + "/ImageSets/Main"
 
 # Training params
 BATCH_SIZE = 16
+EPOCHS = 100
