@@ -1,4 +1,4 @@
-from utils import parse_label, parse_prediction
+from utils import iou_calc, parse_label, parse_prediction
 from config import *
 import tensorflow as tf 
 from tensorflow import keras
@@ -58,5 +58,7 @@ class YoloModel(Model):
         super(YoloModel, self).__init__(inputs=self.in_layer, outputs=self.out_layer)
 
     def yolo_loss_fn(self, prediction, label):
-        pred_class, confidence, boxes = parse_prediction(prediction)
-        true_class, has_obj, box = parse_label(label)
+        pred_class, confidence, pred_boxes = parse_prediction(prediction)
+        true_class, has_obj, true_box = parse_label(label)
+
+        iou = iou_calc(true_box, pred_boxes)

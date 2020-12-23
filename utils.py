@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.core.arrayprint import dtype_short_repr
 from numpy.core.fromnumeric import reshape
 import tensorflow as tf
 from tensorflow.python.ops.functional_ops import Gradient
@@ -29,14 +30,42 @@ def iou_calc(target_box: tf.Tensor, pred_boxes: tf.Tensor) -> tf.Tensor:
         ---
         ## Params
         ### target_box
-        tf.Tensor with shape of (None, GRID_COUNT, GRID_COUNT, 4)\n
+        tf.Tensor with shape of (None, GRID_COUNT, GRID_COUNT, BOX_PER_GRID, 4)\n
         ### pred_boxes
-        tf.Tensor with shape of (None, GRID_COUNT, GRID_COUNT, 4 * BOX_PER_GRID)
+        tf.Tensor with shape of (None, GRID_COUNT, GRID_COUNT, BOX_PER_GRID, 4)
 
         ## Return\n
         tf.Tensor with shape of (None, GRID_COUNT, GRID_COUNT, BOX_PER_GRID)
     '''
+    batch_size = target_box.shape[0]
+    off_set = tf.range(GRID_COUNT, dtype=tf.float32)
+    off_set = tf.tile(tf.reshape(
+                        off_set, 
+                        (1, 1, GRID_COUNT, 1)),
+                      (batch_size, GRID_COUNT, 1, BOX_PER_GRID))
+    
+    target_left_side = (target_box[...,0] + off_set) / GRID_COUNT - target_box[...,2] / 2
+    target_right_side = (target_box[...,0] + off_set) / GRID_COUNT + target_box[...,2] / 2
+    target_upper_side = (target_box[...,1] + off_set) / GRID_COUNT - target_box[...,3] / 2
+    target_lower_side = (target_box[...,1] + off_set) / GRID_COUNT + target_box[...,3] / 2
 
+    pred_left_side = (pred_boxes[...,0] + off_set) / GRID_COUNT - pred_boxes[...,2] / 2
+    pred_right_side = (pred_boxes[...,0] + off_set) / GRID_COUNT + pred_boxes[...,2] / 2
+    pred_upper_side = (pred_boxes[...,1] + off_set) / GRID_COUNT - pred_boxes[...,3] / 2
+    pred_lower_side = (pred_boxes[...,1] + off_set) / GRID_COUNT + pred_boxes[...,3] / 2
+
+    inter_height = tf.minimum(tf.maximum(target_lower_side - pred_upper_side, 0), 
+                              tf.minimum(tf.maximum(pred_lower_side - target_upper_side, 0),
+                              tf.minimum(pred_lower_side - pred_upper_side,
+                              target_lower_side - target_upper_side)))
+    inter_width = tf.minimum(tf.maximum(target_right_side - pred_left_side, 0),
+                             tf.minimum(tf.maximum(pred_right_side - target_left_side, 0),
+                             tf.minimum(pred_right_side - pred_left_side,
+                             target_right_side - target_left_side)))
+    inter_area = inter_height * inter_width
+    total_area = pred_boxes[...,2] * pred_boxes[...,3] + target_box[...,2] * target_box[...,3] - inter_area
+
+    return inter_area / total_area
 
 def parse_prediction(preds: tf.Tensor) -> list:
     '''
@@ -52,9 +81,7 @@ def parse_prediction(preds: tf.Tensor) -> list:
         >>> confidence[..., 1] # Confidence for second box
         
         ### Boxes Location :
-        >>> boxes[..., 0:4] # Box location 1 (x, y, w, h)
-        >>> boxes[..., 4:8] # Box location 2 
-        >>> # ...
+        >>> boxes[...,box_num ,0:4] # Box location 1 (x, y, w, h)
     '''
     batch_cnt = preds.shape[0]
     class_splitter = GRID_COUNT * GRID_COUNT * CLASS_COUNT
@@ -64,7 +91,7 @@ def parse_prediction(preds: tf.Tensor) -> list:
     confidence = tf.reshape(preds[...,class_splitter:conf_splitter], 
                             (batch_cnt, GRID_COUNT, GRID_COUNT, BOX_PER_GRID))
     boxes = tf.reshape(preds[...,conf_splitter:], 
-                       (batch_cnt, GRID_COUNT, GRID_COUNT, BOX_PER_GRID * 4))
+                       (batch_cnt, GRID_COUNT, GRID_COUNT, BOX_PER_GRID, 4))
     return class_score, confidence, boxes
 
 def parse_label(labels: tf.Tensor) -> list:
@@ -80,7 +107,10 @@ def parse_label(labels: tf.Tensor) -> list:
     ### Box Location :
     >>> box[...,:] # Box location 1 (x, y, w, h)
     '''
+    batch_cnt = labels.shape[0]
     has_obj = labels[..., 0]
     box = labels[..., 1:5]
+    box = tf.reshape(box, (batch_cnt, GRID_COUNT, GRID_COUNT, 1, 4))
+    box = tf.tile(box, [1, 1, 1, BOX_PER_GRID, 1])
     classification = labels[..., 5:]
-    return classification, box, has_obj
+    return classification, has_obj, box
